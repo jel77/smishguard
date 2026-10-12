@@ -10,7 +10,6 @@ from pathlib import Path
 import pandas as pd
 
 DATA_DIR = Path(__file__).parent / "datasets"
-CONFIG_FILE = DATA_DIR / "config.json"
 
 TEXT_COLS = ["text", "message", "sms", "msg", "v2", "content", "body", "sms_text", "message_text"]
 SENDER_COLS = ["sender", "from", "sender_id", "address", "phone", "number"]
@@ -49,25 +48,28 @@ def _to_label(series, positive=None, negative=None):
     return out
 
 
-def load_config():
-    if CONFIG_FILE.exists():
-        return json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+def load_config(data_dir=DATA_DIR):
+    config_file = Path(data_dir) / "config.json"
+    if config_file.exists():
+        return json.loads(config_file.read_text(encoding="utf-8"))
     return {}
 
 
-def signature():
+def signature(data_dir=DATA_DIR):
     """Changes whenever a CSV or the config is added, removed or edited (used as a cache key)."""
-    if not DATA_DIR.exists():
+    data_dir, config_file = Path(data_dir), Path(data_dir) / "config.json"
+    if not data_dir.exists():
         return ()
-    files = sorted(DATA_DIR.glob("*.csv")) + ([CONFIG_FILE] if CONFIG_FILE.exists() else [])
+    files = sorted(data_dir.glob("*.csv")) + ([config_file] if config_file.exists() else [])
     return tuple((f.name, f.stat().st_size, f.stat().st_mtime) for f in files)
 
 
-def load_extra():
+def load_extra(data_dir=DATA_DIR):
     """Returns (combined DataFrame[text, label, sender, source], per-file summary DataFrame)."""
-    config = load_config()
+    data_dir = Path(data_dir)
+    config = load_config(data_dir)
     frames, summary = [], []
-    for path in sorted(DATA_DIR.glob("*.csv")) if DATA_DIR.exists() else []:
+    for path in sorted(data_dir.glob("*.csv")) if data_dir.exists() else []:
         cfg = config.get(path.name, {})
         row = {"File": path.name, "Text column": None, "Label column": None, "Sender column": None,
                "Rows used": 0, "Smishing": 0, "Legit": 0, "Dropped": 0, "Status": "OK"}
