@@ -13,6 +13,8 @@ from sklearn.svm import SVC
 from sklearn.metrics import (accuracy_score, precision_score, recall_score,
                              f1_score, confusion_matrix)
 
+import data_loader
+
 st.set_page_config(page_title="SmishGuard", page_icon="🛡️", layout="wide")
 
 # ---------- Features (same as the notebook) ----------
@@ -41,11 +43,16 @@ def hand(t):
 
 # ---------- Training ----------
 def fit(df, extra=None):
-    """Train all 3 models. `extra` = flagged messages added to the TRAINING set only,
-    so test metrics stay comparable with the original model."""
+    """Train all 3 models. `extra` = Kaggle datasets and/or flagged messages, added to the
+    TRAINING set only, so the test set is always the held-out Taglish data."""
     tr, te = train_test_split(df, test_size=0.2, stratify=df.label, random_state=42)
+    n_extra = 0
     if extra is not None and len(extra):
-        tr = pd.concat([tr, extra], ignore_index=True)
+        # Drop extra rows that also appear in the test set, or the scores would be inflated
+        test_texts = set(te.text.str.strip().str.lower())
+        extra = extra[~extra.text.str.strip().str.lower().isin(test_texts)]
+        n_extra = len(extra)
+        tr = pd.concat([tr, extra[["text", "label"]]], ignore_index=True)
 
     vec = TfidfVectorizer(ngram_range=(1, 2))
     sc = MaxAbsScaler()
@@ -83,7 +90,7 @@ def fit(df, extra=None):
     coef = pd.Series(models["Logistic Regression"].coef_[0], index=names)
 
     return {"vec": vec, "sc": sc, "models": models, "results": results,
-            "coef": coef, "n_train": len(tr), "n_test": len(te), "df": df}
+            "coef": coef, "n_train": len(tr), "n_test": len(te), "n_extra": n_extra, "df": df}
 
 
 @st.cache_resource(show_spinner="Loading dataset...")
@@ -93,9 +100,15 @@ def load_base(csv_path="sms_taglish.csv"):
     return df
 
 
+@st.cache_resource(show_spinner="Loading datasets/ folder...")
+def load_extra(sig):
+    """`sig` changes when files in datasets/ change, which reloads them."""
+    return data_loader.load_extra()
+
+
 @st.cache_resource(show_spinner="Training models...")
-def base_artifacts():
-    return fit(load_base())
+def base_artifacts(sig):
+    return fit(load_base(), load_extra(sig)[0])
 
 
 @st.cache_resource
@@ -115,13 +128,16 @@ def predict_all(art, msg):
 st.title("🛡️ SmishGuard")
 st.caption("Detecting banking and online payment smishing in Filipino/Taglish SMS")
 
+sig = data_loader.signature()
 try:
-    base_art = base_artifacts()
+    base_art = base_artifacts(sig)
 except FileNotFoundError:
     st.error("`sms_taglish.csv` not found. Put it in the same folder as app.py.")
     st.stop()
 
 # Use the retrained model if this session has one
+if st.session_state.get("retrained_sig", sig) != sig:
+    st.session_state.pop("art_retrained", None)  # datasets/ changed: drop the stale retrain
 art = st.session_state.get("art_retrained", base_art)
 flags = flag_store()
 
@@ -183,9 +199,10 @@ with tab_fb:
                            help="One extra message barely moves a model trained on hundreds of rows, so repeating it gives it more weight.")
         c1, c2, c3 = st.columns(3)
         if c1.button("🔁 Retrain with flagged messages", type="primary"):
-            extra = pd.concat([fdf] * repeat, ignore_index=True)
+            extra = pd.concat([load_extra(sig)[0]] + [fdf] * repeat, ignore_index=True)
             with st.spinner("Retraining..."):
                 st.session_state["art_retrained"] = fit(load_base(), extra)
+                st.session_state["retrained_sig"] = sig
             st.success("Retrained! The Live demo now uses the updated models. Re-analyze your message to check.")
             st.rerun()
         c2.download_button("⬇️ Download flagged.csv", fdf.to_csv(index=False),
@@ -203,7 +220,8 @@ with tab_fb:
                "To keep them permanently, download flagged.csv and add its rows to sms_taglish.csv in GitHub.")
 
 with tab_models:
-    st.write(f"Train: **{art['n_train']}** messages | Test: **{art['n_test']}** messages")
+    st.write(f"Train: **{art['n_train']}** messages (incl. **{art['n_extra']}** from datasets/ "
+             f"and flags) | Test: **{art['n_test']}** Taglish messages")
     st.dataframe(art["results"].set_index("Model"), width="stretch")
     st.bar_chart(art["results"].set_index("Model")[["Accuracy", "Precision", "Recall", "F1"]])
     st.caption("Missed scams (FN) are the costly error here: a smishing text that got through. "
@@ -227,6 +245,19 @@ with tab_feat:
 
 with tab_data:
     df = base_art["df"]
-    st.write(df.shape)
+    st.subheader("Core Taglish dataset (sms_taglish.csv)")
+    st.write(f"{len(df)} messages. 80% is used for training, 20% is the test set for every score in the app.")
     st.bar_chart(df.label.map({0: "Legit", 1: "Smishing"}).value_counts())
     st.dataframe(df.sample(min(10, len(df)), random_state=1), width="stretch")
+
+    st.subheader("Extra training data (datasets/ folder)")
+    extra, summary = load_extra(sig)
+    if summary.empty:
+        st.info("No CSVs in `datasets/` yet. Drop Kaggle CSVs there and refresh the page; "
+                "see `datasets/README.md` for the format.")
+    else:
+        st.write(f"**{len(extra)}** unique messages from **{(summary.Status == 'OK').sum()}** file(s), "
+                 "used for training only.")
+        st.dataframe(summary, width="stretch", hide_index=True)
+        if (summary.Status != "OK").any():
+            st.warning("Some files were skipped. Fix them with `datasets/config.json` (see `datasets/README.md`).")

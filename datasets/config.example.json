@@ -1,0 +1,9 @@
+{
+  "kaggle_smishing.csv": {
+    "text": "TEXT",
+    "label": "LABEL",
+    "positive": ["smishing"],
+    "negative": ["ham"]
+  },
+  "big_english_spam.csv": { "skip": true }
+}
