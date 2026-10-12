@@ -39,20 +39,21 @@ def hand(t):
     ]
 
 
-# ---------- Train once, cache across reruns and users ----------
-@st.cache_resource(show_spinner="Training models...")
-def train(csv_path="sms_taglish.csv"):
-    df = pd.read_csv(csv_path).dropna(subset=["text", "label"])
-    df["label"] = df.label.astype(int)
-
+# ---------- Training ----------
+def fit(df, extra=None):
+    """Train all 3 models. `extra` = flagged messages added to the TRAINING set only,
+    so test metrics stay comparable with the original model."""
     tr, te = train_test_split(df, test_size=0.2, stratify=df.label, random_state=42)
+    if extra is not None and len(extra):
+        tr = pd.concat([tr, extra], ignore_index=True)
+
     vec = TfidfVectorizer(ngram_range=(1, 2))
     sc = MaxAbsScaler()
 
-    def build(d, fit=False):
+    def build(d, fit_=False):
         txt = d.text.apply(clean)
         H = np.array([hand(t) for t in d.text])
-        if fit:
+        if fit_:
             return hstack([vec.fit_transform(txt), csr_matrix(sc.fit_transform(H))]).tocsr()
         return hstack([vec.transform(txt), csr_matrix(sc.transform(H))]).tocsr()
 
@@ -85,6 +86,25 @@ def train(csv_path="sms_taglish.csv"):
             "coef": coef, "n_train": len(tr), "n_test": len(te), "df": df}
 
 
+@st.cache_resource(show_spinner="Loading dataset...")
+def load_base(csv_path="sms_taglish.csv"):
+    df = pd.read_csv(csv_path).dropna(subset=["text", "label"])
+    df["label"] = df.label.astype(int)
+    return df
+
+
+@st.cache_resource(show_spinner="Training models...")
+def base_artifacts():
+    return fit(load_base())
+
+
+@st.cache_resource
+def flag_store():
+    """Shared in-memory list of flagged messages (all visitors share it).
+    Lost when the app restarts, so download the CSV to keep it."""
+    return {}
+
+
 def predict_all(art, msg):
     X = hstack([art["vec"].transform([clean(msg)]),
                 csr_matrix(art["sc"].transform([hand(msg)]))]).tocsr()
@@ -96,13 +116,17 @@ st.title("🛡️ SmishGuard")
 st.caption("Detecting banking and online payment smishing in Filipino/Taglish SMS")
 
 try:
-    art = train()
+    base_art = base_artifacts()
 except FileNotFoundError:
     st.error("`sms_taglish.csv` not found. Put it in the same folder as app.py.")
     st.stop()
 
-tab_demo, tab_models, tab_feat, tab_data = st.tabs(
-    ["🔎 Live demo", "📊 Model comparison", "🧠 Top features", "🗂️ Dataset"])
+# Use the retrained model if this session has one
+art = st.session_state.get("art_retrained", base_art)
+flags = flag_store()
+
+tab_demo, tab_fb, tab_models, tab_feat, tab_data = st.tabs(
+    ["🔎 Live demo", "🚩 Feedback", "📊 Model comparison", "🧠 Top features", "🗂️ Dataset"])
 
 EXAMPLES = {
     "GCash scare + short link": "GCash: Na-lock ang account mo. I-verify agad dito: bit.ly/gc-verify",
@@ -112,12 +136,19 @@ EXAMPLES = {
 }
 
 with tab_demo:
+    if "art_retrained" in st.session_state:
+        st.info("Using the **retrained** model (includes flagged messages).")
     choice = st.selectbox("Try an example (or write your own below)", ["— custom —"] + list(EXAMPLES))
     default = EXAMPLES.get(choice, "")
     msg = st.text_area("Paste an SMS message", value=default, height=120, key=f"msg_{choice}")
 
     if st.button("Analyze", type="primary") and msg.strip():
-        probs = predict_all(art, msg)
+        st.session_state["last"] = {"msg": msg.strip(), "probs": predict_all(art, msg)}
+
+    last = st.session_state.get("last")
+    if last:
+        probs = last["probs"]
+        st.markdown(f"**Message:** {last['msg']}")
         cols = st.columns(3)
         for col, (name, p) in zip(cols, probs.items()):
             with col:
@@ -130,11 +161,53 @@ with tab_demo:
         votes = sum(p >= 0.5 for p in probs.values())
         st.info(f"{votes} of 3 models flag this message as smishing.")
 
+        st.markdown("**Is the result wrong? Tell SmishGuard the correct label:**")
+        b1, b2, _ = st.columns([1, 1, 2])
+        if b1.button("🚩 It's actually SMISHING"):
+            flags[last["msg"]] = 1
+            st.toast("Flagged as smishing. See the Feedback tab.")
+        if b2.button("✅ It's actually LEGIT"):
+            flags[last["msg"]] = 0
+            st.toast("Flagged as legit. See the Feedback tab.")
+
+with tab_fb:
+    st.write("Messages you flag are collected here. Retrain to teach the models from them.")
+    if not flags:
+        st.info("Nothing flagged yet. Analyze a message in the Live demo tab, then use the flag buttons.")
+    else:
+        fdf = pd.DataFrame({"text": list(flags.keys()), "label": list(flags.values())})
+        shown = fdf.assign(label=fdf.label.map({1: "Smishing", 0: "Legit"}))
+        st.dataframe(shown, width="stretch")
+
+        repeat = st.slider("Repeat each flagged message N times when training", 1, 20, 5,
+                           help="One extra message barely moves a model trained on hundreds of rows, so repeating it gives it more weight.")
+        c1, c2, c3 = st.columns(3)
+        if c1.button("🔁 Retrain with flagged messages", type="primary"):
+            extra = pd.concat([fdf] * repeat, ignore_index=True)
+            with st.spinner("Retraining..."):
+                st.session_state["art_retrained"] = fit(load_base(), extra)
+            st.success("Retrained! The Live demo now uses the updated models. Re-analyze your message to check.")
+            st.rerun()
+        c2.download_button("⬇️ Download flagged.csv", fdf.to_csv(index=False),
+                           file_name="flagged.csv", mime="text/csv")
+        if c3.button("🗑️ Clear flags"):
+            flags.clear()
+            st.rerun()
+
+    if "art_retrained" in st.session_state:
+        if st.button("↩️ Go back to the original model"):
+            del st.session_state["art_retrained"]
+            st.rerun()
+
+    st.caption("Heads up: flags are shared by everyone using the app and are lost when the app restarts. "
+               "To keep them permanently, download flagged.csv and add its rows to sms_taglish.csv in GitHub.")
+
 with tab_models:
     st.write(f"Train: **{art['n_train']}** messages | Test: **{art['n_test']}** messages")
     st.dataframe(art["results"].set_index("Model"), width="stretch")
     st.bar_chart(art["results"].set_index("Model")[["Accuracy", "Precision", "Recall", "F1"]])
-    st.caption("Missed scams (FN) are the costly error here: a smishing text that got through.")
+    st.caption("Missed scams (FN) are the costly error here: a smishing text that got through. "
+               "Test metrics always use the original held-out data.")
 
 with tab_feat:
     coef = art["coef"]
@@ -153,7 +226,7 @@ with tab_feat:
     st.pyplot(fig)
 
 with tab_data:
-    df = art["df"]
+    df = base_art["df"]
     st.write(df.shape)
     st.bar_chart(df.label.map({0: "Legit", 1: "Smishing"}).value_counts())
     st.dataframe(df.sample(min(10, len(df)), random_state=1), width="stretch")
