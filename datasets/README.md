@@ -18,6 +18,7 @@ Each CSV needs one text column and one label column. Common names are detected f
 |---|---|
 | Text | `text`, `message`, `sms`, `msg`, `v2`, `content`, `body`, `sms_text`, `message_text` |
 | Label | `label`, `v1`, `category`, `class`, `type`, `target`, `spam`, `is_spam`, `labels` |
+| Sender (optional) | `sender`, `from`, `sender_id`, `address`, `phone`, `number` |
 
 Label values are converted to `1` (smishing/scam) or `0` (legit):
 
@@ -25,6 +26,10 @@ Label values are converted to `1` (smishing/scam) or `0` (legit):
 - `0`: `0`, `ham`, `legit`, `legitimate`, `normal`, `not spam`, `false`, `no`
 
 Rows with any other label are dropped (shown in the "Dropped" column).
+
+The sender column is optional. A sender that is a plain mobile number (`09171234567`, `+639...`)
+counts as `number`; a name or short code (`BDO`, `GCash`, `2958`) counts as `alpha`; blank
+counts as `unknown`. Files without a sender column are treated as all `unknown`.
 
 ## config.json (only if auto-detection gets a file wrong)
 
@@ -43,7 +48,7 @@ See `config.example.json`.
 }
 ```
 
-- `text` / `label`: the exact column names in that file.
+- `text` / `label` / `sender`: the exact column names in that file (`sender` is optional).
 - `positive`: the label values that count as smishing (`1`).
 - `negative`: the label values that count as legit (`0`). If you give only `positive`,
   every other value counts as legit.

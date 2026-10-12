@@ -20,7 +20,10 @@ st.set_page_config(page_title="SmishGuard", page_icon="🛡️", layout="wide")
 # ---------- Features (same as the notebook) ----------
 URGENT = ["kailangan agad", "agad", "ngayon", "claim now", "urgent", "expire", "last chance", "within 24"]
 MONEY = ["php", "₱", "peso", "prize", "premyo", "panalo", "nanalo", "won", "reward", "cash", "gcash", "maya", "bdo", "bpi", "account"]
-HAND_NAMES = ["has_url", "short_url", "urgency_count", "money_count", "length", "special_chars"]
+HAND_NAMES = ["has_url", "short_url", "urgency_count", "money_count", "length", "special_chars",
+              "has_phone", "sender_is_number", "sender_is_alpha", "sender_unknown"]
+# PH mobile numbers: 09xx xxx xxxx, +639..., 639...
+PH_PHONE = re.compile(r"(?<!\d)(?:\+?63|0)9\d{2}[\s-]?\d{3}[\s-]?\d{4}(?!\d)")
 
 
 def clean(t):
@@ -29,8 +32,19 @@ def clean(t):
     return re.sub(r"\d+", " NUM ", t)
 
 
-def hand(t):
+def sender_type(sender):
+    """'number' (plain mobile number), 'alpha' (named ID like BDO or a short code like 2958) or 'unknown' (blank)."""
+    s = str(sender or "").strip()
+    if not s or s.lower() == "nan":
+        return "unknown"
+    if re.fullmatch(r"\+?[\d\s-]{7,}", s):
+        return "number"
+    return "alpha"
+
+
+def hand(t, sender=""):
     l = t.lower()
+    st_ = sender_type(sender)
     return [
         int(bool(re.search(r"https?://|www\.|\b[a-z0-9-]+\.(xyz|top|cc|info|online|net|com)\b", l))),
         int(bool(re.search(r"bit\.ly|tinyurl|cutt\.ly|shorturl", l))),
@@ -38,6 +52,10 @@ def hand(t):
         sum(k in l for k in MONEY),
         len(t),
         sum(not c.isalnum() and not c.isspace() for c in t),
+        int(bool(PH_PHONE.search(t))),
+        int(st_ == "number"),
+        int(st_ == "alpha"),
+        int(st_ == "unknown"),
     ]
 
 
@@ -52,14 +70,14 @@ def fit(df, extra=None):
         test_texts = set(te.text.str.strip().str.lower())
         extra = extra[~extra.text.str.strip().str.lower().isin(test_texts)]
         n_extra = len(extra)
-        tr = pd.concat([tr, extra[["text", "label"]]], ignore_index=True)
+        tr = pd.concat([tr, extra[["text", "label", "sender"]]], ignore_index=True)
 
     vec = TfidfVectorizer(ngram_range=(1, 2))
     sc = MaxAbsScaler()
 
     def build(d, fit_=False):
         txt = d.text.apply(clean)
-        H = np.array([hand(t) for t in d.text])
+        H = np.array([hand(t, snd) for t, snd in zip(d.text, d.sender)])
         if fit_:
             return hstack([vec.fit_transform(txt), csr_matrix(sc.fit_transform(H))]).tocsr()
         return hstack([vec.transform(txt), csr_matrix(sc.transform(H))]).tocsr()
@@ -95,8 +113,9 @@ def fit(df, extra=None):
 
 @st.cache_resource(show_spinner="Loading dataset...")
 def load_base(csv_path="sms_taglish.csv"):
-    df = pd.read_csv(csv_path).dropna(subset=["text", "label"])
+    df = pd.read_csv(csv_path, dtype={"sender": str}).dropna(subset=["text", "label"])
     df["label"] = df.label.astype(int)
+    df["sender"] = df["sender"].fillna("") if "sender" in df else ""
     return df
 
 
@@ -118,9 +137,9 @@ def flag_store():
     return {}
 
 
-def predict_all(art, msg):
+def predict_all(art, msg, sender=""):
     X = hstack([art["vec"].transform([clean(msg)]),
-                csr_matrix(art["sc"].transform([hand(msg)]))]).tocsr()
+                csr_matrix(art["sc"].transform([hand(msg, sender)]))]).tocsr()
     return {n: float(m.predict_proba(X)[0][1]) for n, m in art["models"].items()}
 
 
@@ -144,27 +163,32 @@ flags = flag_store()
 tab_demo, tab_fb, tab_models, tab_feat, tab_data = st.tabs(
     ["🔎 Live demo", "🚩 Feedback", "📊 Model comparison", "🧠 Top features", "🗂️ Dataset"])
 
+# (sender, message)
 EXAMPLES = {
-    "GCash scare + short link": "GCash: Na-lock ang account mo. I-verify agad dito: bit.ly/gc-verify",
-    "Prize scam": "Congrats! Nanalo ka ng P30,000. I-claim now: promo-ph.xyz",
-    "Real bank OTP": "Your BDO OTP is 482913. Do not share this code with anyone.",
-    "Casual Taglish chat": "pre nasend ko na yung pambayad, check mo na lang",
+    "GCash scare + short link": ("+639561234567", "GCash: Na-lock ang account mo. I-verify agad dito: bit.ly/gc-verify"),
+    "Prize scam": ("09281234567", "Congrats! Nanalo ka ng P30,000. I-claim now: promo-ph.xyz"),
+    "Real bank OTP": ("BDO", "Your BDO OTP is 482913. Do not share this code with anyone."),
+    "Casual Taglish chat": ("", "pre nasend ko na yung pambayad, check mo na lang"),
 }
 
 with tab_demo:
     if "art_retrained" in st.session_state:
         st.info("Using the **retrained** model (includes flagged messages).")
     choice = st.selectbox("Try an example (or write your own below)", ["— custom —"] + list(EXAMPLES))
-    default = EXAMPLES.get(choice, "")
+    default_sender, default = EXAMPLES.get(choice, ("", ""))
+    sender = st.text_input("Sender (optional): a number like 09171234567 or a name like BDO",
+                           value=default_sender, key=f"sender_{choice}")
     msg = st.text_area("Paste an SMS message", value=default, height=120, key=f"msg_{choice}")
 
     if st.button("Analyze", type="primary") and msg.strip():
-        st.session_state["last"] = {"msg": msg.strip(), "probs": predict_all(art, msg)}
+        st.session_state["last"] = {"msg": msg.strip(), "sender": sender.strip(),
+                                    "probs": predict_all(art, msg, sender)}
 
     last = st.session_state.get("last")
     if last:
         probs = last["probs"]
-        st.markdown(f"**Message:** {last['msg']}")
+        st.markdown(f"**Sender:** {last['sender'] or '(not given)'} ({sender_type(last['sender'])})  \n"
+                    f"**Message:** {last['msg']}")
         cols = st.columns(3)
         for col, (name, p) in zip(cols, probs.items()):
             with col:
@@ -180,10 +204,10 @@ with tab_demo:
         st.markdown("**Is the result wrong? Tell SmishGuard the correct label:**")
         b1, b2, _ = st.columns([1, 1, 2])
         if b1.button("🚩 It's actually SMISHING"):
-            flags[last["msg"]] = 1
+            flags[(last["msg"], last["sender"])] = 1
             st.toast("Flagged as smishing. See the Feedback tab.")
         if b2.button("✅ It's actually LEGIT"):
-            flags[last["msg"]] = 0
+            flags[(last["msg"], last["sender"])] = 0
             st.toast("Flagged as legit. See the Feedback tab.")
 
 with tab_fb:
@@ -191,7 +215,8 @@ with tab_fb:
     if not flags:
         st.info("Nothing flagged yet. Analyze a message in the Live demo tab, then use the flag buttons.")
     else:
-        fdf = pd.DataFrame({"text": list(flags.keys()), "label": list(flags.values())})
+        fdf = pd.DataFrame({"text": [m for m, _ in flags], "label": list(flags.values()),
+                            "sender": [snd for _, snd in flags]})
         shown = fdf.assign(label=fdf.label.map({1: "Smishing", 0: "Legit"}))
         st.dataframe(shown, width="stretch")
 

@@ -13,6 +13,7 @@ DATA_DIR = Path(__file__).parent / "datasets"
 CONFIG_FILE = DATA_DIR / "config.json"
 
 TEXT_COLS = ["text", "message", "sms", "msg", "v2", "content", "body", "sms_text", "message_text"]
+SENDER_COLS = ["sender", "from", "sender_id", "address", "phone", "number"]
 LABEL_COLS = ["label", "v1", "category", "class", "type", "target", "spam", "is_spam", "labels"]
 POSITIVE = {"1", "spam", "smishing", "smish", "scam", "phishing", "fraud", "true", "yes"}
 NEGATIVE = {"0", "ham", "legit", "legitimate", "normal", "not spam", "false", "no"}
@@ -63,12 +64,12 @@ def signature():
 
 
 def load_extra():
-    """Returns (combined DataFrame[text, label, source], per-file summary DataFrame)."""
+    """Returns (combined DataFrame[text, label, sender, source], per-file summary DataFrame)."""
     config = load_config()
     frames, summary = [], []
     for path in sorted(DATA_DIR.glob("*.csv")) if DATA_DIR.exists() else []:
         cfg = config.get(path.name, {})
-        row = {"File": path.name, "Text column": None, "Label column": None,
+        row = {"File": path.name, "Text column": None, "Label column": None, "Sender column": None,
                "Rows used": 0, "Smishing": 0, "Legit": 0, "Dropped": 0, "Status": "OK"}
         try:
             if cfg.get("skip"):
@@ -79,9 +80,11 @@ def load_extra():
             if tcol not in df.columns or lcol not in df.columns:
                 raise ValueError(f"can't find text/label columns in {list(df.columns)[:8]}; "
                                  "set them in config.json")
-            row["Text column"], row["Label column"] = tcol, lcol
+            scol = cfg.get("sender") or _find(df.columns, SENDER_COLS)
+            row["Text column"], row["Label column"], row["Sender column"] = tcol, lcol, scol
             out = pd.DataFrame({"text": df[tcol].astype(str).str.strip(),
-                                "label": _to_label(df[lcol], cfg.get("positive"), cfg.get("negative"))})
+                                "label": _to_label(df[lcol], cfg.get("positive"), cfg.get("negative")),
+                                "sender": df[scol].fillna("").astype(str).str.strip() if scol in df else ""})
             before = len(out)
             out = out[(out.text != "") & (out.text.str.lower() != "nan")].dropna(subset=["label"])
             out["label"] = out.label.astype(int)
@@ -96,6 +99,6 @@ def load_extra():
         summary.append(row)
 
     extra = (pd.concat(frames, ignore_index=True) if frames
-             else pd.DataFrame({"text": [], "label": [], "source": []}))
+             else pd.DataFrame({"text": [], "label": [], "sender": [], "source": []}))
     extra = extra.drop_duplicates(subset="text").reset_index(drop=True)
     return extra, pd.DataFrame(summary)
