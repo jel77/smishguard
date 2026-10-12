@@ -1,3 +1,6 @@
+import hashlib
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -215,8 +218,21 @@ def recommend(cv, cutoff=0.5):
             "cutoff": float(best_cut), "cut_summary": cv_summary(cv, float(best_cut))[1].loc[best]}
 
 
-@st.cache_resource(show_spinner="Loading dataset...")
-def load_base(csv_path="sms_taglish.csv"):
+BASE_CSV = Path(__file__).parent / "sms_taglish.csv"
+SOURCE_FILES = [Path(__file__), Path(__file__).parent / "features.py", Path(__file__).parent / "data_loader.py"]
+
+
+def cache_key():
+    """Key for every cached result. It changes when the code, sms_taglish.csv or anything in datasets/
+    changes, so a running server (e.g. Streamlit Cloud after a git push) never mixes models trained
+    by old code or old data with the current code."""
+    h = hashlib.sha1()
+    for f in SOURCE_FILES + [BASE_CSV]:
+        h.update(f.read_bytes() if f.exists() else b"")
+    return (h.hexdigest()[:12], data_loader.signature())
+
+
+def load_base(csv_path=BASE_CSV):
     df = pd.read_csv(csv_path, dtype={"sender": str}).dropna(subset=["text", "label"])
     df["label"] = df.label.astype(int)
     df["sender"] = df["sender"].fillna("") if "sender" in df else ""
@@ -225,7 +241,7 @@ def load_base(csv_path="sms_taglish.csv"):
 
 @st.cache_resource(show_spinner="Loading datasets/ folder...")
 def load_extra(sig):
-    """`sig` changes when files in datasets/ change, which reloads them."""
+    """`sig` (from cache_key) changes when files in datasets/ change, which reloads them."""
     return data_loader.load_extra()
 
 
@@ -256,7 +272,7 @@ def predict_all(art, msg, sender=""):
 st.title("🛡️ SmishGuard")
 st.caption("Detecting banking and online payment smishing in Filipino/Taglish SMS")
 
-sig = data_loader.signature()
+sig = cache_key()
 try:
     base_art = base_artifacts(sig)
 except FileNotFoundError:
@@ -265,7 +281,7 @@ except FileNotFoundError:
 
 # Use the retrained model if this session has one
 if st.session_state.get("retrained_sig", sig) != sig:
-    st.session_state.pop("art_retrained", None)  # datasets/ changed: drop the stale retrain
+    st.session_state.pop("art_retrained", None)  # code or data changed: drop the stale retrain
 art = st.session_state.get("art_retrained", base_art)
 flags = flag_store()
 
