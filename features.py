@@ -33,7 +33,9 @@ def sender_type(sender):
     s = str(sender or "").strip()
     if not s or s.lower() == "nan":
         return "unknown"
-    if re.fullmatch(r"\+?[\d\s-]{7,}", s):
+    # `*` covers masked numbers in public datasets ("+63960****655"). No prefix whitelist: the 2023
+    # list of PH network prefixes misses newer ones (0981, 0985, 0900, ...) common in the data
+    if re.fullmatch(r"\+?[\d\s*-]{7,}", s) and re.search(r"\d", s):
         return "number"
     return "alpha"
 

@@ -1,5 +1,6 @@
 {
   "kaggle_smishing.csv": {
+    "role": "train",
     "text": "TEXT",
     "label": "LABEL",
     "positive": ["smishing"],

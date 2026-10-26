@@ -3,3 +3,8 @@ __pycache__/
 *.pyc
 .streamlit/secrets.toml
 .pytest_cache/
+
+# Datasets we may use but not redistribute (see datasets/README.md for download links)
+datasets/asea_sms_scam_detection_raw_dataset.csv
+datasets/AGR-Yes_SPAM_SMS_dataset.csv
+datasets/bwandowando_sms_scam_dataset.csv

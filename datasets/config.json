@@ -1,0 +1,35 @@
+{
+  "asea_sms_scam_detection_raw_dataset.csv": {
+    "role": "core",
+    "text": "text",
+    "label": "intent",
+    "sender": "masked_celphone_number",
+    "positive": ["Bank Scam", "Banking Scam", "Prize Scam", "Raffle Scam", "Loan Scam", "Investment Scam",
+                 "Pasaload Scam", "Delivery Scam", "Government Spoofing", "Gambling Scam"],
+    "negative": ["HAM"],
+    "note": "Commercial Spam, Job Scam, Other and spam are dropped (out of scope or ambiguous)"
+  },
+  "tagalog-sms.xlsx": {
+    "role": "core",
+    "text": "text",
+    "label": "category",
+    "sender": "sender",
+    "positive": ["spam"],
+    "negative": ["notifs", "otp", "gov"],
+    "note": "ads are dropped (official promos, neither smishing nor everyday legit SMS)"
+  },
+  "Dataset_5971_(mendeley).csv": {
+    "role": "train",
+    "positive": ["smishing"],
+    "negative": ["ham"],
+    "note": "English; general spam is dropped"
+  },
+  "bwandowando_sms_scam_dataset.csv": {
+    "skip": true,
+    "note": "no labels, and ~80% is already in the ASEA file with labels"
+  },
+  "AGR-Yes_SPAM_SMS_dataset.csv": {
+    "skip": true,
+    "note": "no labels, and ~91% is already in the ASEA file with labels"
+  }
+}

@@ -22,6 +22,11 @@ def feat(text, sender=""):
     ("BDO", "alpha"),
     ("GCash", "alpha"),
     ("2958", "alpha"),  # 4-digit short codes are official senders, like named IDs
+    ("+63960****655", "number"),  # masked numbers in public datasets
+    ("+6396***32373", "number"),
+    ("+63981****875", "number"),  # prefix newer than the 2023 network prefix list
+    ("789BIngo 5", "alpha"),
+    ("****", "alpha"),
 ])
 def test_sender_type(sender, expected):
     assert sender_type(sender) == expected
@@ -118,6 +123,43 @@ def test_loader_handles_kaggle_formats(tmp_path):
     assert rows.loc["a scam", "label"] == 1 and rows.loc["a scam", "sender"] == "09171234567"
     assert rows.loc["BDO verify", "label"] == 1
     assert "buy now" not in rows.index  # 'spam' dropped by config
+
+
+def test_loader_reads_xlsx_roles_and_fixes_mojibake(tmp_path):
+    pd.DataFrame({"text": ["Weâ€™re here", "Ok"], "category": ["spam", "notifs"],
+                  "sender": ["+63960****655", "GCash"]}).to_excel(tmp_path / "ph.xlsx", index=False)
+    # PHONE is a yes/no flag here, not a sender column
+    pd.DataFrame({"LABEL": ["ham"], "TEXT": ["hello"], "PHONE": ["No"]}).to_csv(tmp_path / "en.csv", index=False)
+    (tmp_path / "config.json").write_text(json.dumps(
+        {"ph.xlsx": {"role": "core", "positive": ["spam"], "negative": ["notifs"]}}))
+
+    extra, summary = data_loader.load_extra(tmp_path)
+    assert (summary.Status == "OK").all()
+    rows = extra.set_index("text")
+    assert rows.loc["We’re here", "label"] == 1 and rows.loc["We’re here", "role"] == "core"
+    assert rows.loc["We’re here", "sender"] == "+63960****655"
+    assert rows.loc["hello", "role"] == "train" and rows.loc["hello", "sender"] == ""
+
+
+def test_loader_rejects_unknown_role(tmp_path):
+    pd.DataFrame({"text": ["x"], "label": [1]}).to_csv(tmp_path / "a.csv", index=False)
+    (tmp_path / "config.json").write_text(json.dumps({"a.csv": {"role": "test"}}))
+    assert data_loader.load_extra(tmp_path)[1].Status[0].startswith("Skipped: role")
+
+
+def test_fix_mojibake_leaves_clean_text_alone():
+    assert data_loader.fix_mojibake("Dasmariñas ₱500 café") == "Dasmariñas ₱500 café"
+    assert data_loader.fix_mojibake("Shiftâ€™s Over") == "Shift’s Over"
+
+
+def test_dedupe_by_template_and_drops_conflicts():
+    df = pd.DataFrame({"text": ["Your OTP is 111111", "Your OTP is 222222",           # same template
+                                "Claim at a.xyz", "Claim at b.xyz",                   # same template...
+                                "hello"],
+                       "label": [0, 0, 1, 0, 0]})                                     # ...labelled both ways
+    out, n_conflicts = data_loader.dedupe(df)
+    assert list(out.text) == ["Your OTP is 111111", "hello"]
+    assert n_conflicts == 2
 
 
 def test_loader_skip_and_signature(tmp_path):
