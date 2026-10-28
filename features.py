@@ -1,8 +1,16 @@
 """Text cleaning and hand-made features for SmishGuard (shared by the app and the tests)."""
 import re
 
-URGENT = ["kailangan agad", "agad", "ngayon", "claim now", "urgent", "expire", "last chance", "within 24"]
-MONEY = ["php", "₱", "peso", "prize", "premyo", "panalo", "nanalo", "won", "reward", "cash", "gcash", "maya", "bdo", "bpi", "account"]
+URGENT = ["kailangan agad", "agad", "ngayon", "claim now", "urgent", "expire", "last chance", "within 24",
+          # Filipino/Taglish and common scam phrases (checked against the core dataset)
+          "within 12", "ma-lock", "na-lock", "naka-hold", "on hold", "locked", "mawawala", "mapapaso",
+          "ma-deactivate", "made-deactivate", "i-verify", "i-update", "i-confirm", "i-claim", "i-secure",
+          "mag-login", "click here", "click now", "kindly", "unauthorized", "hindi awtorisadong",
+          "final notice", "last reminder"]
+MONEY = ["php", "₱", "peso", "prize", "premyo", "panalo", "nanalo", "won", "reward", "cash", "gcash", "maya", "bdo", "bpi", "account",
+         # gambling, prizes and earning words (checked against the core dataset)
+         "bonus", "deposit", "libre", "jackpot", "slot", "casino", "tumaya", "sabong", "rebate", "winner",
+         "kumita", "puhunan", "giveaway", "spin", "refund", "ayuda", "usdt", "laro"]
 HAND_NAMES = ["has_url", "short_url", "suspicious_tld", "urgency_count", "money_count", "length",
               "special_chars", "has_phone", "sender_is_number", "sender_is_alpha", "sender_unknown"]
 # PH mobile numbers: 09xx xxx xxxx, +639..., 639...
