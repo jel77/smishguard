@@ -12,7 +12,8 @@ MONEY = ["php", "₱", "peso", "prize", "premyo", "panalo", "nanalo", "won", "re
          "bonus", "deposit", "libre", "jackpot", "slot", "casino", "tumaya", "sabong", "rebate", "winner",
          "kumita", "puhunan", "giveaway", "spin", "refund", "ayuda", "usdt", "laro"]
 HAND_NAMES = ["has_url", "short_url", "suspicious_tld", "urgency_count", "money_count", "length",
-              "special_chars", "has_phone", "sender_is_number", "sender_is_alpha", "sender_unknown"]
+              "special_chars", "has_phone", "sender_is_number", "sender_is_alpha", "sender_unknown",
+              "scrambled_count"]
 # PH mobile numbers: 09xx xxx xxxx, +639..., 639...
 PH_PHONE = re.compile(r"(?<!\d)(?:\+?63|0)9\d{2}[\s-]?\d{3}[\s-]?\d{4}(?!\d)")
 
@@ -24,16 +25,53 @@ SHORTENERS = re.compile(r"\b(?:bit\.ly|tinyurl\.com|cutt\.ly|shorturl\.at|is\.gd
 # Cheap TLDs often used for throwaway scam domains (official PH sites use .com, .com.ph, .gov.ph)
 SUSPICIOUS_TLD = re.compile(r"\.(?:xyz|top|cc|info|online|site|click|link|live|shop|icu|buzz|vip|tk|ml|ga|cf|gq)\b(?:/|$)", re.I)
 
+# Scrambled spelling: scammers write "Sl0ts", "B0ss", "pan@lunin" to dodge keyword filters
+LEET = {"0": "o", "1": "i", "3": "e", "4": "a", "@": "a"}
+WORD = re.compile(r"[A-Za-z0-9@]+")
+# 1-3 look-alike characters with a letter on both sides ("sl0ts", "b00st", "pan@lunin")
+LEET_RUN = re.compile(r"(?<=[a-z])[0134@]{1,3}(?=[a-z])", re.I)
+NOT_LEET_DIGIT = re.compile(r"[256789]")
+CONSONANT_RUN = re.compile(r"[^aeiou]{4,}", re.I)  # random codes like "q0uXCqkIhgZ", not real words
+
 
 def urls(t):
     return [m.group().rstrip(".,!?)") for m in URL_RE.finditer(t)]
 
 
+def _descramble_word(w):
+    # Only plain words are fixed. Leave alone: amounts and IDs (digits with no look-alike letter),
+    # words with fewer than 3 letters, ALL-CAPS tokens (reference codes and promo names such as
+    # "BIG40BUPD0", "SURF4ALL"), and results that are not word-like (leftover digits, 4+ consonants in a row)
+    if w.isupper() or NOT_LEET_DIGIT.search(w) or sum(c.isalpha() for c in w) < 3:
+        return w
+    fixed = LEET_RUN.sub(lambda m: "".join(LEET[c] for c in m.group()), w)
+    if fixed == w or any(c.isdigit() for c in fixed) or CONSONANT_RUN.search(fixed):
+        return w
+    return fixed
+
+
+def descramble(t):
+    """Undo look-alike characters inside words ("Sl0ts" -> "slots"). Returns lowercase text."""
+    return WORD.sub(lambda m: _descramble_word(m.group()), t).lower()
+
+
+def scrambled_count(t):
+    """Number of scrambled words in a message (links are ignored)."""
+    t = URL_RE.sub(" ", t)
+    return sum(_descramble_word(m.group()) != m.group() for m in WORD.finditer(t))
+
+
 def clean(t):
     # Replace each link with a URL token but keep its words ("gcash-verify.top" -> "URL gcash verify top"),
-    # since words like "verify" inside scam domains are useful signals
-    t = URL_RE.sub(lambda m: " URL " + re.sub(r"[^a-z0-9]+", " ", m.group().lower()) + " ", t.lower())
-    return re.sub(r"\d+", " NUM ", t)
+    # since words like "verify" inside scam domains are useful signals. Scrambled words ("sl0ts" -> "slots")
+    # are repaired before digits become NUM; this runs on the original-case text because ALL-CAPS codes are skipped
+    out, pos = [], 0
+    for m in URL_RE.finditer(t):
+        out.append(descramble(t[pos:m.start()]))
+        out.append(" URL " + re.sub(r"[^a-z0-9]+", " ", descramble(m.group())) + " ")
+        pos = m.end()
+    out.append(descramble(t[pos:]))
+    return re.sub(r"\d+", " NUM ", "".join(out))
 
 
 def sender_type(sender):
@@ -64,4 +102,5 @@ def hand(t, sender=""):
         int(st_ == "number"),
         int(st_ == "alpha"),
         int(st_ == "unknown"),
+        scrambled_count(t),
     ]
