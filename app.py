@@ -285,7 +285,7 @@ with tab_feat:
 
     # --- Feature sets (H3, Obj. 7) ---
     st.subheader("Feature sets: words, hand-made features, or both")
-    st.write("Cross-validates every model again with only the TF-IDF words, and with only the 11 hand-made "
+    st.write("Cross-validates every model again with only the TF-IDF words, and with only the 12 hand-made "
              f"features, on the same folds ({n_rep} repeats, as set in the Model comparison tab). "
              "McNemar's test then checks each against words + hand-made.")
     if st.button("▶️ Run feature-set comparison") or st.session_state.get("fs_ran") == (sig, n_rep):
