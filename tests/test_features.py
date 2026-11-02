@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 
 import data_loader
-from features import HAND_NAMES, clean, hand, sender_type, urls
+from features import HAND_NAMES, clean, descramble, hand, sender_type, urls
 
 
 def feat(text, sender=""):
@@ -89,6 +89,60 @@ def test_keyword_counts():
     f = feat("URGENT: claim now ang premyo mo sa GCash agad")
     assert f["urgency_count"] >= 3  # urgent, claim now, agad
     assert f["money_count"] >= 2    # premyo, gcash
+
+
+# ---------- scrambled spelling ----------
+@pytest.mark.parametrize("text, expected", [
+    ("b0ss", "boss"),
+    ("sl0ts", "slots"),
+    ("pan@lunin", "panalunin"),
+    ("p4ssw0rd", "password"),
+    ("b00st", "boost"),
+    ("y0ur gcash", "your gcash"),
+])
+def test_descramble_fixes_scrambled_words(text, expected):
+    assert descramble(text) == expected
+
+
+@pytest.mark.parametrize("text", [
+    "your otp is 482913",
+    "gcash123",
+    "gcash100",
+    "p500.00",
+    "a1b2c3",
+    "10am",
+    "@juan",
+])
+def test_descramble_leaves_numbers_and_codes_alone(text):
+    assert descramble(text) == text.lower()
+
+
+@pytest.mark.parametrize("text", [
+    "Ref:BIG40BUPD0",       # reference codes and promo names are ALL-CAPS
+    "AKQ03CMWRY",
+    "ABS14PJY3L",
+    "SURF4ALL",
+    "q0uXCqkIhgZ",          # random token: not word-like once repaired
+])
+def test_descramble_leaves_codes_and_promo_names_alone(text):
+    assert descramble(text) == text.lower()
+    assert feat(text)["scrambled_count"] == 0
+
+
+def test_clean_recovers_scrambled_words():
+    out = clean("Sl0ts at B0ss, P500 bonus")
+    assert "slots" in out.split() and "boss" in out
+    assert "sl NUM ts" not in out
+    assert "NUM" in out and "500" not in out  # real numbers still become NUM
+
+
+def test_scrambled_count():
+    assert feat("Win at Sl0ts and B0ss casino")["scrambled_count"] == 2
+    assert feat("pan@lunin ang B0ss")["scrambled_count"] == 2
+    assert feat("Your OTP is 482913. Pay P500 via GCash123")["scrambled_count"] == 0
+    assert feat("Claim at gcash-v3rify.top/login")["scrambled_count"] == 0  # links are ignored
+    assert feat("Email juan@gmail.com")["scrambled_count"] == 0
+    assert feat("P60.00 loaded. Ref:AKQ03CMWRY. Get MORE with PROMO LOAD in the Smart App! SURF4ALL")["scrambled_count"] == 0
 
 
 def test_hand_feature_count_matches_names():
