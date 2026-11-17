@@ -3,6 +3,9 @@ __pycache__/
 *.pyc
 .streamlit/secrets.toml
 .pytest_cache/
+admin_messages.sqlite3
+admin_messages.sqlite3-shm
+admin_messages.sqlite3-wal
 
 # Datasets we may use but not redistribute (see datasets/README.md for download links)
 datasets/asea_sms_scam_detection_raw_dataset.csv

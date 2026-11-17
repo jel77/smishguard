@@ -41,6 +41,29 @@ pytest                 # everything, including a ~15s run of the whole app
 pytest -m "not slow"   # skip the app run
 ```
 
+## Admin inbox
+
+Every non-empty message submitted with **Analyze message** is saved to a local SQLite database
+for review. The Analyze tab tells users that their submitted message and optional sender are stored.
+The database is shared by app users on the same host and survives app restarts.
+
+Set admin credentials before opening the **Admin** page:
+
+1. Create `.streamlit/secrets.toml` (this file is ignored by Git).
+2. Add a username and a strong, unique password:
+
+   ```toml
+   SMISHGUARD_ADMIN_USERNAME = "admin-username"
+   SMISHGUARD_ADMIN_PASSWORD = "admin-password"
+   ```
+
+Sign in from the **Admin** section at the bottom of the sidebar. The admin page lets you search and
+filter analyses, assign categories and notes, export the filtered rows as CSV, and delete selected
+messages or the entire inbox. You can also set
+`SMISHGUARD_DB_PATH` to choose a database location. For multiple app processes to share messages,
+they must use the same persistent database path. The default local SQLite file is not suitable for
+multi-host deployments or platforms that discard local files on restart.
+
 ---
 
 ## How it works
@@ -96,12 +119,13 @@ The feature code is in [features.py](features.py).
 | **Model evaluation** | Held-out test results (overall and per source file), a recall vs false-alarm chart across cutoffs, **cross-validation** with **McNemar's significance test**, and a **recommendation** for which model to deploy. |
 | **Feature analysis** | Hand-made features ranked across all 3 models, permutation importance from cross-validation, a **feature-set comparison** (words only vs hand-made only vs both, with McNemar's test), and each model's top features (including the Decision Tree's rules). |
 | **Dataset** | The core dataset, plus a per-file report for anything in `datasets/`. |
+| **Admin** | Password-protected inbox for submitted analyses, including search, organization, export and deletion. |
 
 The **Smishing cutoff** slider in the sidebar sets the probability at which a message counts as
 smishing. Lower it to catch more scams (higher recall) at the cost of more false alarms.
 
-> Flagged messages are kept in memory, are shared by everyone using the same running app, and are
-> lost when it restarts. To keep them, download `flagged.csv` and add the rows to `sms_taglish.csv`.
+> Flagged feedback is kept in memory, is shared by everyone using the same running app, and is lost
+> when it restarts. The admin inbox is a separate persistent record of messages submitted for analysis.
 
 ---
 

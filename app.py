@@ -8,6 +8,9 @@ from sklearn.tree import export_text
 from sklearn.metrics import precision_score, recall_score
 
 import data_loader
+import admin_auth
+import admin_store
+import admin_view
 import model
 from features import HAND_NAMES, sender_type
 from model import (BASELINE, FEATURE_SETS, MODEL_NAMES, cv_significance, cv_summary, feature_set_table,
@@ -101,6 +104,11 @@ with st.sidebar:
     st.caption("Models: Logistic Regression, Decision Tree and linear SVM on TF-IDF words plus "
                f"{len(HAND_NAMES)} hand-made features.")
 
+admin_auth.render_sidebar_login()
+if st.session_state.get("admin_view") and st.session_state.get("admin_authenticated"):
+    admin_view.render()
+    st.stop()
+
 m1, m2, m3, m4 = st.columns(4)
 m1.metric("Core messages", f"{len(base_art['df']):,}", border=True,
           help="Filipino/Taglish messages that are split and cross-validated")
@@ -122,6 +130,11 @@ EXAMPLES = {
 
 # ---------- Analyze ----------
 with tab_demo:
+    st.info(
+        "Privacy note: each message submitted for analysis, along with its optional sender, is saved "
+        "in the password-protected admin inbox for review.",
+        icon=":material/lock:",
+    )
     if retrained:
         st.info("Using the **retrained** model, which includes your flagged messages.",
                 icon=":material/model_training:")
@@ -138,8 +151,13 @@ with tab_demo:
                                placeholder="Paste the text message here")
             if st.button("Analyze message", type="primary", icon=":material/search:", width="stretch") \
                     and msg.strip():
-                st.session_state["last"] = {"msg": msg.strip(), "sender": sender.strip(),
-                                            "probs": predict_all(art, msg, sender)}
+                message, message_sender = msg.strip(), sender.strip()
+                probs = predict_all(art, message, message_sender)
+                votes = sum(p >= cutoff for p in probs.values())
+                verdict = ("Smishing" if votes == len(probs) else
+                           "Legitimate" if votes == 0 else "Uncertain")
+                admin_store.add_message(message, message_sender, verdict, probs)
+                st.session_state["last"] = {"msg": message, "sender": message_sender, "probs": probs}
 
     with right:
         last = st.session_state.get("last")
