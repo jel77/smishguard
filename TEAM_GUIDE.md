@@ -65,7 +65,7 @@ Read [README.md](README.md) (how the app works) and [datasets/README.md](dataset
 
 The goal: flagged messages get reviewed by a person before the models are trained on them.
 
-**How flags work today.** In the Live demo tab, the 🚩/✅ buttons store a message, its sender and
+**How flags work today.** In the Analyze tab, the **Mark as smishing** / **Mark as legitimate** buttons store a message, its sender and
 the corrected label in memory (`flag_store()` in `app.py`). They're shared by everyone using the
 app and **lost when it restarts**. The Feedback tab lists them, can download them as
 `flagged.csv` (`text, label, sender`), and has a **Retrain with flagged messages** button, which
@@ -83,7 +83,7 @@ for the defense (no database). Suggested `feedback/flags.csv`:
 | `flagged_at` | When it was flagged |
 | `reviewed_by`, `reviewed_at`, `note` | Filled in by the admin |
 
-**A2. Save flags to that file.** When a 🚩/✅ button is pressed, append a `pending` row instead
+**A2. Save flags to that file.** When one of those buttons is pressed, append a `pending` row instead
 of (or as well as) keeping it in memory. Flags then survive restarts.
 
 **A3. Build the review screen.** A separate Streamlit page (e.g. `pages/admin.py`, which
@@ -165,7 +165,7 @@ The code makes choices the paper must describe. All are explained in the README 
    dropping templates labelled both ways.
 5. **Preprocessing:** lowercasing, links → `URL` + their words, digits → `NUM`, repairing
    garbled characters.
-6. **Features:** TF-IDF of words and 2-word phrases, plus the 11 hand-made features.
+6. **Features:** TF-IDF of words and 2-word phrases, plus the 12 hand-made features.
 7. **Sender dropout:** why every training message with a sender is also added without it.
 8. **Models:** LR, DT (max depth 8), linear SVM (`LinearSVC`, calibrated), all class-balanced,
    plus the random-guess baseline.
@@ -186,7 +186,7 @@ features means redoing the results.
 
 ## 6. Defense prep (everyone)
 
-- Prepare 5–6 demo messages for the Live demo: a GCash/BDO scam, a gambling scam, a real OTP, a
+- Prepare 5–6 demo messages for the Analyze tab: a GCash/BDO scam, a gambling scam, a real OTP, a
   real bank notification, casual Taglish, and one the models get wrong (shows the limits honestly).
 - Rehearse the flag → admin review → retrain flow.
 - Each member should be able to explain their own part, and the limitations in the README.

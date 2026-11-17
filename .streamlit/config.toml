@@ -1,0 +1,46 @@
+# SmishGuard theme: a restrained "analyst console" look that follows the viewer's light/dark setting.
+[theme]
+font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap, sans-serif"
+headingFont = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap, sans-serif"
+codeFont = "JetBrains Mono:https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap, monospace"
+headingFontWeights = [700, 600, 600, 600, 600, 600]
+baseFontSize = 15
+baseRadius = "6px"
+buttonRadius = "6px"
+showWidgetBorder = true
+showSidebarBorder = true
+linkUnderline = false
+
+[theme.light]
+primaryColor = "#1F4E79"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F4F6F9"
+textColor = "#1A2230"
+borderColor = "#DCE1E8"
+redColor = "#B42318"
+greenColor = "#1E7B4F"
+blueColor = "#1F4E79"
+orangeColor = "#B5650D"
+# Series colours for every chart: blue, teal, amber, brick
+chartCategoricalColors = ["#2F6FA8", "#2A9D8F", "#D08C2E", "#B5524A", "#6B7A90"]
+
+[theme.light.sidebar]
+backgroundColor = "#F4F6F9"
+
+[theme.dark]
+primaryColor = "#6CA6DC"
+backgroundColor = "#0F141B"
+secondaryBackgroundColor = "#1A212B"
+textColor = "#E3E8EF"
+borderColor = "#2A3340"
+redColor = "#F0705F"
+greenColor = "#4FBF87"
+blueColor = "#6CA6DC"
+orangeColor = "#E7A04B"
+chartCategoricalColors = ["#6CA6DC", "#45BFAE", "#E7A04B", "#E07A70", "#9AA7B8"]
+
+[theme.dark.sidebar]
+backgroundColor = "#141A22"
+
+[client]
+toolbarMode = "minimal"

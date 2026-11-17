@@ -1,4 +1,4 @@
-# 🛡️ SmishGuard
+# SmishGuard
 
 **Detecting banking and online-payment smishing in Filipino/Taglish SMS** using Logistic
 Regression, Decision Tree and Support Vector Machine (SVM) classifiers.
@@ -51,7 +51,7 @@ SMS text + sender
    ├─ clean(): lowercase, links → "URL <words in link>", digits → "NUM"
    │     └─ TF-IDF of words and 2-word phrases
    │
-   └─ hand(): 11 hand-made features (below), scaled to 0..1
+   └─ hand(): 12 hand-made features (below), scaled to 0..1
          │
          ▼
   Logistic Regression · Decision Tree · linear SVM   (+ random-guess baseline)
@@ -91,11 +91,11 @@ The feature code is in [features.py](features.py).
 
 | Tab | What it does |
 |---|---|
-| 🔎 **Live demo** | Paste a message (and optionally its sender). Each model gives a smishing probability, and a vote shows how many models flag it. You can flag wrong results. |
-| 🚩 **Feedback** | The messages you flagged. Retrain the models with them, download them as `flagged.csv`, or go back to the original model. |
-| 📊 **Model comparison** | Held-out test results (overall and per source file), a recall vs false-alarm chart across cutoffs, **cross-validation** with **McNemar's significance test**, and a **recommendation** for which model to deploy. |
-| 🧠 **Top features** | Hand-made features ranked across all 3 models, permutation importance from cross-validation, a **feature-set comparison** (words only vs hand-made only vs both, with McNemar's test), and each model's top features (including the Decision Tree's rules). |
-| 🗂️ **Dataset** | The core dataset, plus a per-file report for anything in `datasets/`. |
+| **Analyze** | Paste a message (and optionally its sender). Each model gives a smishing probability, and a verdict shows how many models flag it. You can mark wrong results as smishing or legitimate. |
+| **Feedback** | The messages you flagged. Retrain the models with them, download them as `flagged.csv`, or go back to the original model. |
+| **Model evaluation** | Held-out test results (overall and per source file), a recall vs false-alarm chart across cutoffs, **cross-validation** with **McNemar's significance test**, and a **recommendation** for which model to deploy. |
+| **Feature analysis** | Hand-made features ranked across all 3 models, permutation importance from cross-validation, a **feature-set comparison** (words only vs hand-made only vs both, with McNemar's test), and each model's top features (including the Decision Tree's rules). |
+| **Dataset** | The core dataset, plus a per-file report for anything in `datasets/`. |
 
 The **Smishing cutoff** slider in the sidebar sets the probability at which a message counts as
 smishing. Lower it to catch more scams (higher recall) at the cost of more false alarms.
@@ -185,7 +185,7 @@ These numbers change as the data grows; the app always shows the current ones.*
 ```
 app.py                  Streamlit app: the UI and cached training
 model.py                Training, evaluation, cross-validation and statistics (no UI)
-features.py             Text cleaning and the 11 hand-made features
+features.py             Text cleaning and the 12 hand-made features
 data_loader.py          Loads, standardises and deduplicates CSV/Excel files from datasets/
 sms_taglish.csv         Our own Filipino/Taglish messages (part of the core set)
 datasets/               Extra datasets and config.json (see datasets/README.md)
