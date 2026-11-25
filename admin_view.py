@@ -9,6 +9,12 @@ import admin_store
 def render():
     st.title("Admin inbox", anchor=False, icon=":material/admin_panel_settings:")
     st.caption("Review, organize, export, or delete messages submitted for analysis.")
+    st.info(
+        "Set a message's category to **Smishing** or **Legitimate** to approve it for training. These decisions "
+        "are used when the models are retrained in the Feedback tab, and they replace a user's flag for the "
+        "same message. **Uncategorized** and **Needs review** messages are not used.",
+        icon=":material/model_training:",
+    )
 
     admin_store.initialize()
     messages = admin_store.list_messages()
@@ -25,21 +31,29 @@ def render():
         st.info("No messages match these filters.")
     else:
         df = pd.DataFrame(filtered)
+        user_flags = {(f["text"], f["sender"]): f["label"] for f in admin_store.list_flags()}
+        df["user_flag"] = [
+            {1: "Smishing", 0: "Legitimate"}.get(user_flags.get((text, sender)), "")
+            for text, sender in zip(df["text"], df["sender"])
+        ]
         df["probabilities"] = df["probabilities"].map(
             lambda values: ", ".join(f"{name}: {probability:.1%}" for name, probability in values.items())
         )
-        columns = ["id", "created_at", "sender", "text", "verdict", "probabilities", "category", "notes"]
+        columns = ["id", "created_at", "sender", "text", "verdict", "user_flag", "probabilities", "category", "notes"]
         edited = st.data_editor(
             df[columns],
             width="stretch",
             hide_index=True,
-            disabled=["id", "created_at", "sender", "text", "verdict", "probabilities"],
+            disabled=["id", "created_at", "sender", "text", "verdict", "user_flag", "probabilities"],
             column_config={
                 "id": st.column_config.NumberColumn("ID"),
                 "created_at": st.column_config.TextColumn("Submitted (UTC)"),
                 "sender": st.column_config.TextColumn("Sender"),
                 "text": st.column_config.TextColumn("Message", width="large"),
                 "verdict": st.column_config.TextColumn("Model verdict"),
+                "user_flag": st.column_config.TextColumn(
+                    "User flag", help="The label a user said is correct with Mark as smishing or Mark as legitimate"
+                ),
                 "probabilities": st.column_config.TextColumn("Model probabilities", width="large"),
                 "category": st.column_config.SelectboxColumn(
                     "Admin category", options=admin_store.CATEGORIES, required=True
@@ -49,7 +63,7 @@ def render():
             key="admin_message_editor",
         )
 
-        export_df = pd.DataFrame(filtered)[columns]
+        export_df = df.assign(probabilities=pd.DataFrame(filtered)["probabilities"])[columns]
         with st.container(horizontal=True, gap="small", vertical_alignment="center"):
             if st.button("Save categories and notes", icon=":material/save:"):
                 admin_store.update_reviews(edited[["id", "category", "notes"]].to_dict("records"))

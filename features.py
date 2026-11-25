@@ -55,10 +55,26 @@ def descramble(t):
     return WORD.sub(lambda m: _descramble_word(m.group()), t).lower()
 
 
+def scrambled_words(t):
+    """The scrambled words in a message, as written ("Sl0ts", "B0ss"). Links are ignored."""
+    t = URL_RE.sub(" ", t)
+    return [m.group() for m in WORD.finditer(t) if _descramble_word(m.group()) != m.group()]
+
+
 def scrambled_count(t):
     """Number of scrambled words in a message (links are ignored)."""
-    t = URL_RE.sub(" ", t)
-    return sum(_descramble_word(m.group()) != m.group() for m in WORD.finditer(t))
+    return len(scrambled_words(t))
+
+
+# A keyword only counts at the start of a word, so "maya" doesn't match inside "mamaya" and
+# "laro" doesn't match inside "maglaro", while "slot" still matches "slots"
+_KEYWORD_RE = {k: re.compile(r"(?<![a-z0-9])" + re.escape(k)) for k in URGENT + MONEY}
+
+
+def keywords_found(t, words):
+    """The keywords from `words` that appear in `t` (matched at the start of a word, any case)."""
+    l = t.lower()
+    return [k for k in words if _KEYWORD_RE[k].search(l)]
 
 
 def clean(t):
@@ -87,15 +103,14 @@ def sender_type(sender):
 
 
 def hand(t, sender=""):
-    l = t.lower()
     st_ = sender_type(sender)
     links = urls(t)
     return [
         int(bool(links)),
         int(any(SHORTENERS.search(u) for u in links)),
         int(any(SUSPICIOUS_TLD.search(u.split("?")[0]) for u in links)),
-        sum(k in l for k in URGENT),
-        sum(k in l for k in MONEY),
+        len(keywords_found(t, URGENT)),
+        len(keywords_found(t, MONEY)),
         len(t),
         sum(not c.isalnum() and not c.isspace() for c in t),
         int(bool(PH_PHONE.search(t))),

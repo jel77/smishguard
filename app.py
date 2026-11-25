@@ -13,6 +13,7 @@ import admin_store
 import admin_view
 import model
 from features import HAND_NAMES, sender_type
+from signs import spoofing_warning, warning_signs
 from model import (BASELINE, FEATURE_SETS, MODEL_NAMES, cv_significance, cv_summary, feature_set_table,
                    fit, metrics_table, predict_all, recommend)
 
@@ -53,11 +54,10 @@ def run_cv(sig, n_repeats, features="both"):
     return model.cross_validate(core, train_extra, n_repeats, features=features)
 
 
-@st.cache_resource
-def flag_store():
-    """Shared in-memory list of flagged messages (all visitors share it).
-    Lost when the app restarts, so download the CSV to keep it."""
-    return {}
+def load_flags():
+    """Flagged messages from the admin database, as {(message, sender): label}. They are shared by
+    everyone using the same app and kept when the app restarts."""
+    return {(f["text"], f["sender"]): f["label"] for f in admin_store.list_flags()}
 
 
 def section(title, text=None):
@@ -83,7 +83,7 @@ if st.session_state.get("retrained_sig", sig) != sig:
     st.session_state.pop("art_retrained", None)  # code or data changed: drop the stale retrain
 art = st.session_state.get("art_retrained", base_art)
 retrained = "art_retrained" in st.session_state
-flags = flag_store()
+flags = load_flags()
 
 with st.sidebar:
     st.markdown("### Detection settings")
@@ -95,7 +95,7 @@ with st.sidebar:
     st.caption("Applies to the Analyze and Model evaluation tabs.")
     st.markdown("### Model status")
     if retrained:
-        st.badge("Retrained with flags", color="orange", icon=":material/model_training:")
+        st.badge("Retrained with feedback", color="orange", icon=":material/model_training:")
     else:
         st.badge("Base model", color="primary", icon=":material/verified:")
     st.caption(f"Trained on {art['n_train']:,} messages. Evaluated on {art['n_test']:,} held-out "
@@ -136,7 +136,7 @@ with tab_demo:
         icon=":material/lock:",
     )
     if retrained:
-        st.info("Using the **retrained** model, which includes your flagged messages.",
+        st.info("Using the **retrained** model, which includes the flagged and admin-reviewed messages.",
                 icon=":material/model_training:")
     left, right = st.columns([5, 7], gap="large")
     with left:
@@ -191,65 +191,103 @@ with tab_demo:
                         st.badge("Legitimate", color="green")
 
             snd = last["sender"]
+            spoof = spoofing_warning(last["msg"], snd)
+            if spoof:
+                st.error(spoof["detail"], title=spoof["title"], icon=":material/warning:")
+
             st.caption(f"Analyzed message. Sender: {snd or 'not given'} ({sender_type(snd)})")
             st.code(last["msg"], language=None, wrap_lines=True)
+
+            signs = warning_signs(last["msg"], snd)
+            with st.container(border=True):
+                st.markdown(f"**Warning signs found:** {len(signs)}")
+                if signs:
+                    st.markdown("\n".join(f"- **{s['sign']}**: {s['detail']}" for s in signs))
+                else:
+                    st.caption("No common warning signs were found in this message.")
+                st.caption("These signs explain what the message contains. They don't decide the verdict, and "
+                           "real bank or e-wallet messages can contain some of them too.")
 
             st.space("small")
             st.markdown("**Is this result wrong?** Record the correct label to use it for retraining.")
             b1, b2 = st.columns(2)
             if b1.button("Mark as smishing", icon=":material/flag:", width="stretch"):
-                flags[(last["msg"], last["sender"])] = 1
+                admin_store.add_flag(last["msg"], last["sender"], 1)
                 st.toast("Recorded as smishing. See the Feedback tab.")
             if b2.button("Mark as legitimate", icon=":material/check_circle:", width="stretch"):
-                flags[(last["msg"], last["sender"])] = 0
+                admin_store.add_flag(last["msg"], last["sender"], 0)
                 st.toast("Recorded as legitimate. See the Feedback tab.")
 
 # ---------- Feedback ----------
 with tab_fb:
-    section("Flagged messages", "Messages marked as misclassified in the Analyze tab. Retrain to teach the "
-                                "models from them.")
-    if not flags:
+    flags = load_flags()  # re-read: a flag may have been added after the sidebar was drawn
+    fdf = pd.DataFrame({"text": [m for m, _ in flags], "label": list(flags.values()),
+                        "sender": [snd for _, snd in flags]}, columns=["text", "label", "sender"])
+    adf = pd.DataFrame(admin_store.reviewed_for_training(), columns=["text", "label", "sender"])
+    label_names = {1: "Smishing", 0: "Legit"}
+
+    section("Flagged messages", "Messages marked as misclassified in the Analyze tab.")
+    if fdf.empty:
         st.info("Nothing flagged yet. Analyze a message, then use **Mark as smishing** or **Mark as legitimate**.",
                 icon=":material/info:")
     else:
-        fdf = pd.DataFrame({"text": [m for m, _ in flags], "label": list(flags.values()),
-                            "sender": [snd for _, snd in flags]})
-        in_test = fdf.text.map(data_loader.dedup_key).isin(base_art["test_keys"])
-        shown = fdf.assign(label=fdf.label.map({1: "Smishing", 0: "Legit"}),
-                           **{"In test set": in_test.map({True: "Yes (not used)", False: ""})})
-        st.dataframe(shown, width="stretch", hide_index=True, alt="Flagged messages",
+        st.dataframe(fdf.assign(label=fdf.label.map(label_names)), width="stretch", hide_index=True,
+                     alt="Flagged messages",
                      column_config={"text": "Message", "label": "Corrected label", "sender": "Sender"})
-        if in_test.any():
-            st.warning(f"{int(in_test.sum())} flagged message(s) are in the held-out test set, so retraining "
-                       "leaves them out on purpose: training on test messages would make the scores look better "
-                       "than they really are. Rephrase the message slightly if you want the model to learn from it.")
 
-        repeat = st.slider("Weight of each flagged message (copies added to training)", 1, 20, 5,
-                           help="One extra message barely moves a model trained on thousands of rows, so "
-                                "repeating it gives it more weight.")
-        c1, c2, c3 = st.columns(3)
-        if c1.button("Retrain with flagged messages", type="primary", icon=":material/model_training:",
-                     width="stretch"):
-            core, train_extra, _, _ = load_data(sig)
-            extra = pd.concat([train_extra] + [fdf] * repeat, ignore_index=True)
-            with st.spinner("Retraining..."):
-                st.session_state["art_retrained"] = fit(core, extra)
-                st.session_state["retrained_sig"] = sig
-            st.toast("Retrained. The Analyze tab now uses the updated models.")
-            st.rerun()
-        c2.download_button("Download flagged.csv", fdf.to_csv(index=False), file_name="flagged.csv",
-                           mime="text/csv", icon=":material/download:", width="stretch")
-        if c3.button("Clear flags", icon=":material/delete:", width="stretch"):
-            flags.clear()
-            st.rerun()
+    section("Admin decisions", "Messages an admin categorized as Smishing or Legitimate in the admin inbox. "
+                               "An admin decision replaces a user's flag for the same message.")
+    if adf.empty:
+        st.info("No admin decisions yet. An admin can sign in from the sidebar and set a message's category to "
+                "**Smishing** or **Legitimate**.", icon=":material/info:")
+    else:
+        st.dataframe(adf.assign(label=adf.label.map(label_names)), width="stretch", hide_index=True,
+                     alt="Messages reviewed by an admin",
+                     column_config={"text": "Message", "label": "Admin label", "sender": "Sender"})
+
+    section("Retrain", "Teach the models from the messages above.")
+    u1, u2 = st.columns(2)
+    use_flags = u1.checkbox(f"Use flagged messages ({len(fdf)})", value=True, disabled=fdf.empty)
+    use_admin = u2.checkbox(f"Use admin decisions ({len(adf)})", value=True, disabled=adf.empty)
+    parts = [d for d, use in ((adf, use_admin), (fdf, use_flags)) if use and not d.empty]
+    # Admin decisions come first, so they win when the same message and sender were also flagged
+    feedback = (pd.concat(parts, ignore_index=True).drop_duplicates(["text", "sender"]) if parts
+                else pd.DataFrame(columns=["text", "label", "sender"]))
+    in_test = feedback.text.map(data_loader.dedup_key).isin(base_art["test_keys"])
+    if in_test.any():
+        st.warning(f"{int(in_test.sum())} of these message(s) are in the held-out test set, so retraining "
+                   "leaves them out on purpose: training on test messages would make the scores look better "
+                   "than they really are. Rephrase the message slightly if you want the model to learn from it.")
+
+    repeat = st.slider("Weight of each message (copies added to training)", 1, 20, 5,
+                       help="One extra message barely moves a model trained on thousands of rows, so "
+                            "repeating it gives it more weight.")
+    c1, c2, c3 = st.columns(3)
+    if c1.button("Retrain the models", type="primary", icon=":material/model_training:", width="stretch",
+                 disabled=feedback.empty):
+        core, train_extra, _, _ = load_data(sig)
+        extra = pd.concat([train_extra] + [feedback.assign(label=feedback.label.astype(int))] * repeat,
+                          ignore_index=True)
+        with st.spinner("Retraining..."):
+            st.session_state["art_retrained"] = fit(core, extra)
+            st.session_state["retrained_sig"] = sig
+        st.toast(f"Retrained with {len(feedback)} message(s). The Analyze tab now uses the updated models.")
+        st.rerun()
+    c2.download_button("Download flagged.csv", fdf.to_csv(index=False), file_name="flagged.csv",
+                       mime="text/csv", icon=":material/download:", width="stretch", disabled=fdf.empty)
+    if c3.button("Clear flags", icon=":material/delete:", width="stretch", disabled=fdf.empty):
+        admin_store.clear_flags()
+        st.rerun()
 
     if retrained:
         if st.button("Revert to the original model", icon=":material/undo:"):
             del st.session_state["art_retrained"]
             st.rerun()
 
-    st.caption("Flags are shared by everyone using the app and are lost when the app restarts. To keep them, "
-               "download flagged.csv and add its rows to sms_taglish.csv in GitHub.")
+    st.caption("Flags and admin decisions are saved in the app's database file (admin_messages.sqlite3), so they "
+               "are kept when the app restarts on the same computer. On Streamlit Community Cloud that file can "
+               "be reset when the app is rebooted or redeployed, so download flagged.csv to keep a copy. A "
+               "retrained model lasts for your browser session only.")
 
 # ---------- Model evaluation ----------
 with tab_models:

@@ -9,6 +9,8 @@ from pathlib import Path
 
 DEFAULT_DB_PATH = Path(__file__).parent / "admin_messages.sqlite3"
 CATEGORIES = ("Uncategorized", "Needs review", "Smishing", "Legitimate")
+# Admin categories that count as a decision on the label, and are used when the models are retrained
+TRAINING_LABELS = {"Smishing": 1, "Legitimate": 0}
 
 
 def _connect(db_path=None):
@@ -42,6 +44,20 @@ def initialize(db_path=None):
                 probabilities TEXT NOT NULL,
                 category TEXT NOT NULL DEFAULT 'Uncategorized',
                 notes TEXT NOT NULL DEFAULT ''
+            )
+            """
+        )
+        # Results that users marked as wrong in the Analyze tab, with the label they say is correct.
+        # One row per message and sender; marking the same message again replaces the label
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS flags (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TEXT NOT NULL,
+                sender TEXT NOT NULL,
+                text TEXT NOT NULL,
+                label INTEGER NOT NULL CHECK (label IN (0, 1)),
+                UNIQUE (text, sender)
             )
             """
         )
@@ -120,3 +136,52 @@ def delete_all_messages(db_path=None):
     with _connection(db_path) as connection:
         cursor = connection.execute("DELETE FROM analyzed_messages")
         return cursor.rowcount
+
+
+def add_flag(text, sender, label, db_path=None):
+    """Save a user's correction (1 = smishing, 0 = legitimate) for a message."""
+    if label not in (0, 1):
+        raise ValueError(f"label must be 0 or 1, not {label!r}")
+    initialize(db_path)
+    created_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    with _connection(db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO flags (created_at, sender, text, label) VALUES (?, ?, ?, ?)
+            ON CONFLICT (text, sender) DO UPDATE SET label = excluded.label, created_at = excluded.created_at
+            """,
+            (created_at, sender, text, int(label)),
+        )
+
+
+def list_flags(db_path=None):
+    """All flags, oldest first, as dicts with text, sender, label and created_at."""
+    initialize(db_path)
+    with _connection(db_path) as connection:
+        rows = connection.execute(
+            "SELECT text, sender, label, created_at FROM flags ORDER BY created_at, id"
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def clear_flags(db_path=None):
+    initialize(db_path)
+    with _connection(db_path) as connection:
+        return connection.execute("DELETE FROM flags").rowcount
+
+
+def reviewed_for_training(db_path=None):
+    """Messages an admin has categorized as Smishing or Legitimate, as dicts with text, sender and
+    label. A message submitted more than once counts once, with its most recent decision."""
+    initialize(db_path)
+    placeholders = ", ".join("?" for _ in TRAINING_LABELS)
+    with _connection(db_path) as connection:
+        rows = connection.execute(
+            f"SELECT text, sender, category FROM analyzed_messages WHERE category IN ({placeholders}) "
+            "ORDER BY created_at DESC, id DESC",
+            list(TRAINING_LABELS),
+        ).fetchall()
+    latest = {}
+    for row in rows:
+        latest.setdefault((row["text"], row["sender"]), TRAINING_LABELS[row["category"]])
+    return [{"text": text, "sender": sender, "label": label} for (text, sender), label in latest.items()]

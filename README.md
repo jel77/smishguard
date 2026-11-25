@@ -33,6 +33,9 @@ scores won't match the ones below.
 
 The app opens at <http://localhost:8501>. On macOS/Linux, activate with `source .venv/bin/activate`.
 
+On Windows you can also double-click **`run_smishguard.bat`**. It creates `.venv` and installs the
+requirements on the first run (Python 3.12+ and an internet connection are needed), then starts the app.
+
 To run the tests:
 
 ```powershell
@@ -59,7 +62,16 @@ Set admin credentials before opening the **Admin** page:
 
 Sign in from the **Admin** section at the bottom of the sidebar. The admin page lets you search and
 filter analyses, assign categories and notes, export the filtered rows as CSV, and delete selected
-messages or the entire inbox. You can also set
+messages or the entire inbox. A **User flag** column shows the label a user gave a message with
+*Mark as smishing* or *Mark as legitimate*.
+
+**Admin decisions are used for training.** Setting a message's category to **Smishing** or
+**Legitimate** approves it with that label. When the models are retrained in the Feedback tab, these
+decisions are added to the training data together with the user flags, and an admin decision
+replaces a user flag for the same message and sender. *Uncategorized* and *Needs review* messages
+are not used.
+
+User flags are stored in the same database (table `flags`), so they also survive app restarts. You can also set
 `SMISHGUARD_DB_PATH` to choose a database location. For multiple app processes to share messages,
 they must use the same persistent database path. The default local SQLite file is not suitable for
 multi-host deployments or platforms that discard local files on restart.
@@ -97,14 +109,19 @@ model as `SVC(kernel="linear")` but about 50× faster on thousands of messages.
 | `has_url` | Message contains a link (`http…`, `www.…`, or a bare domain like `gcash-verify.top`) |
 | `short_url` | Link uses a shortener (`bit.ly`, `cutt.ly`, `tinyurl.com`, `t.me`, …) |
 | `suspicious_tld` | Link ends in a cheap domain often used by scammers (`.xyz`, `.top`, `.cc`, `.online`, `.info`, …) |
-| `urgency_count` | Urgency words: *kailangan agad*, *agad*, *ngayon*, *claim now*, *urgent*, *expire*, … |
-| `money_count` | Money, prize and account words: *php*, *₱*, *premyo*, *panalo*, *gcash*, *maya*, *bdo*, … |
+| `urgency_count` | Urgency words: *kailangan agad*, *agad*, *ngayon*, *claim now*, *urgent*, *expire*, *i-verify*, *na-lock*, … |
+| `money_count` | Money, prize and account words: *php*, *₱*, *premyo*, *panalo*, *gcash*, *maya*, *bdo*, *bonus*, *casino*, … |
 | `length` | Number of characters |
 | `special_chars` | Number of symbols/punctuation |
 | `has_phone` | Message contains a PH mobile number (`09xx xxx xxxx`, `+639…`) |
 | `sender_is_number` | Sender is a plain mobile number |
 | `sender_is_alpha` | Sender is a named ID or short code (`BDO`, `GCash`, `2958`) |
 | `sender_unknown` | No sender given |
+| `scrambled_count` | Words with look-alike characters, such as *Sl0ts*, *B0ss* or *pan@lunin* |
+
+Keywords only count at the start of a word, so *maya* doesn't match inside *mamaya* and *laro*
+doesn't match inside *maglaro*, while *slot* still matches *slots*. Scrambled words are repaired in
+`clean()` before the TF-IDF step (*Sl0ts* → *slots*).
 
 The feature code is in [features.py](features.py).
 
@@ -114,18 +131,19 @@ The feature code is in [features.py](features.py).
 
 | Tab | What it does |
 |---|---|
-| **Analyze** | Paste a message (and optionally its sender). Each model gives a smishing probability, and a verdict shows how many models flag it. You can mark wrong results as smishing or legitimate. |
-| **Feedback** | The messages you flagged. Retrain the models with them, download them as `flagged.csv`, or go back to the original model. |
+| **Analyze** | Paste a message (and optionally its sender). Each model gives a smishing probability, and a verdict shows how many models flag it. The result lists the **warning signs** found in the message (links, shorteners, unusual domains, urgent wording, money words, mobile numbers, disguised spelling) and shows a **sender spoofing warning** when a named sender such as GCash comes with a link that isn't the brand's official site, or a brand is named in an urgent message from a personal number. You can mark wrong results as smishing or legitimate. |
+| **Feedback** | The messages you flagged and the admin decisions. Retrain the models with either or both, download the flags as `flagged.csv`, or go back to the original model. |
 | **Model evaluation** | Held-out test results (overall and per source file), a recall vs false-alarm chart across cutoffs, **cross-validation** with **McNemar's significance test**, and a **recommendation** for which model to deploy. |
 | **Feature analysis** | Hand-made features ranked across all 3 models, permutation importance from cross-validation, a **feature-set comparison** (words only vs hand-made only vs both, with McNemar's test), and each model's top features (including the Decision Tree's rules). |
 | **Dataset** | The core dataset, plus a per-file report for anything in `datasets/`. |
-| **Admin** | Password-protected inbox for submitted analyses, including search, organization, export and deletion. |
+| **Admin** | Password-protected inbox for submitted analyses, including search, organization, export and deletion. Categorizing a message as Smishing or Legitimate approves it for retraining. |
 
 The **Smishing cutoff** slider in the sidebar sets the probability at which a message counts as
 smishing. Lower it to catch more scams (higher recall) at the cost of more false alarms.
 
-> Flagged feedback is kept in memory, is shared by everyone using the same running app, and is lost
-> when it restarts. The admin inbox is a separate persistent record of messages submitted for analysis.
+> Flags and admin decisions are saved in the app's SQLite database and survive restarts on the
+> same computer. Signs and the spoofing warning explain a message; they don't change the models'
+> probabilities. A retrained model lasts for the browser session only.
 
 ---
 
@@ -172,12 +190,44 @@ ChrisThePCGamer (GitHub, no license stated, used but not redistributed).
 
 ## Current results
 
-*As of the 4,043-message core set (2,582 smishing, 1,461 legit) plus 5,289 training-only Mendeley
-messages, cutoff 0.50. Stratified 5-fold cross-validation × 5 repeats (mean ± std over 25 folds).
-These numbers change as the data grows; the app always shows the current ones.*
+*Run on Nov 25, 2026 on the 4,043-message core set (2,582 smishing, 1,461 legit) plus 5,289
+training-only Mendeley messages, cutoff 0.50, with the Tagalog keywords, scrambled-spelling
+handling and start-of-word keyword matching in place. Stratified 5-fold cross-validation × 5
+repeats (mean ± std over 25 folds). These numbers change as the data grows; the app always shows
+the current ones.*
 
 | Model | Accuracy | Precision | Recall | F1 |
 |---|---|---|---|---|
+| **Logistic Regression** | **0.981 ± 0.004** | 0.975 ± 0.006 | **0.995 ± 0.002** | **0.985 ± 0.003** |
+| Decision Tree | 0.971 ± 0.005 | 0.975 ± 0.004 | 0.979 ± 0.007 | 0.977 ± 0.004 |
+| SVM | 0.971 ± 0.007 | **0.995 ± 0.003** | 0.959 ± 0.011 | 0.976 ± 0.006 |
+| Random guess (baseline) | 0.491 ± 0.007 | 0.665 ± 0.010 | 0.408 ± 0.006 | 0.506 ± 0.007 |
+
+- **All three models beat random guessing** (McNemar p < 0.001).
+- **At cutoff 0.50, LR is significantly better than both DT (p = 0.0007) and SVM (p = 0.005).**
+  DT vs SVM is not significantly different (p = 0.77). The app recommends LR (highest recall),
+  with a suggested cutoff of 0.55 (recall 0.994, F1 0.987).
+- **The cutoff matters, especially for SVM.** SVM is the most cautious model (fewest false
+  alarms). At 0.30, its recall rises from 0.959 to 0.981 and it becomes significantly better than
+  both LR and DT (p ≤ 0.0001), with F1 0.986 ± 0.004.
+- **Strongest hand-made features:** the sender features lead the permutation importance for
+  all three models, most of all for the Decision Tree. Among the message features,
+  `money_count`, `urgency_count` and `scrambled_count` have the largest LR/SVM weights.
+- **Hand-made features add real information (H3).** Compared with TF-IDF words alone, words +
+  hand-made features are significantly better for all three models (McNemar p ≤ 0.043; F1 LR
+  0.967 → 0.985, DT 0.904 → 0.977, SVM 0.972 → 0.976). Words + hand-made is also significantly
+  better than hand-made alone for LR and SVM; for the Decision Tree the two are not significantly
+  different (p = 0.72), since its splits are almost all on hand-made features. Note that the
+  hand-made set includes the sender features, which partly reflect which dataset a message came from.
+- **Per source:** on the held-out test set, LR scores F1 0.93 and SVM F1 0.95 on
+  `sms_taglish.csv`, which has no senders. The Decision Tree does worst there (8 false alarms in
+  40), since it relies most on the sender.
+- **Effect of the Nov 25 keyword fix** (keywords counted only at the start of a word): F1 at 0.50
+  went from 0.986 to 0.985 for LR, 0.974 to 0.977 for DT, and stayed at 0.976 for SVM, so the
+  change was kept. Before it, the same code gave LR 0.996 / 0.986, DT 0.976 / 0.974 and SVM
+  0.958 / 0.976 (recall / F1).
+
+---|---|---|---|---|
 | **Logistic Regression** | **0.979 ± 0.004** | 0.972 ± 0.006 | **0.995 ± 0.002** | **0.983 ± 0.003** |
 | Decision Tree | 0.969 ± 0.005 | 0.970 ± 0.006 | 0.982 ± 0.006 | 0.976 ± 0.004 |
 | SVM | 0.973 ± 0.007 | **0.995 ± 0.003** | 0.964 ± 0.010 | 0.979 ± 0.005 |
@@ -210,11 +260,18 @@ These numbers change as the data grows; the app always shows the current ones.*
 app.py                  Streamlit app: the UI and cached training
 model.py                Training, evaluation, cross-validation and statistics (no UI)
 features.py             Text cleaning and the 12 hand-made features
+signs.py                Warning signs and the sender spoofing warning shown on the Analyze tab
+admin_store.py          SQLite storage: submitted messages, admin decisions and user flags
+admin_view.py           The admin inbox page
+admin_auth.py           Admin sign-in in the sidebar
+run_smishguard.bat      Windows launcher (creates .venv, installs requirements, starts the app)
 data_loader.py          Loads, standardises and deduplicates CSV/Excel files from datasets/
 sms_taglish.csv         Our own Filipino/Taglish messages (part of the core set)
 datasets/               Extra datasets and config.json (see datasets/README.md)
 tests/test_features.py  Unit tests for features and the loader
 tests/test_model.py     Tests for training/evaluation, plus a smoke test of the app
+tests/test_signs.py     Tests for the warning signs, spoofing warning and keyword matching
+tests/test_admin_store.py  Tests for the admin database, flags and admin decisions
 TEAM_GUIDE.md           Who does what next
 requirements.txt        Pinned app dependencies
 requirements-dev.txt    App dependencies + pytest

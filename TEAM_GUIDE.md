@@ -65,11 +65,16 @@ Read [README.md](README.md) (how the app works) and [datasets/README.md](dataset
 
 The goal: flagged messages get reviewed by a person before the models are trained on them.
 
-**How flags work today.** In the Analyze tab, the **Mark as smishing** / **Mark as legitimate** buttons store a message, its sender and
-the corrected label in memory (`flag_store()` in `app.py`). They're shared by everyone using the
-app and **lost when it restarts**. The Feedback tab lists them, can download them as
-`flagged.csv` (`text, label, sender`), and has a **Retrain with flagged messages** button, which
-must stay.
+**Status (Nov 25): done, built differently from the plan below.** Ellise's admin inbox (merged
+Nov 17) stores every analyzed message in SQLite (`admin_store.py`) behind a password-protected
+admin page (`admin_view.py`, `admin_auth.py`). On top of that:
+- user flags are saved in the same database (`flags` table), so they survive restarts;
+- the admin page shows each message's user flag, and setting a category to **Smishing** or
+  **Legitimate** approves it with that label;
+- the Feedback tab's **Retrain the models** button uses the flags and/or the admin decisions, and an
+  admin decision replaces a user flag for the same message.
+Tests are in `tests/test_admin_store.py`. Retrain still uses unreviewed flags by default (the user can
+untick them); decide whether it should use admin decisions only. The plan below is kept for reference.
 
 **A1. Agree on the storage format with the lead (first, before any code).** A local CSV is enough
 for the defense (no database). Suggested `feedback/flags.csv`:
@@ -149,6 +154,7 @@ Save them in one shared folder with the cutoff and date for each.
 - **L3.** Decide whether to collect more of our own Filipino/Taglish messages. If yes, Jel can help: collect only with consent, remove names and numbers, add
   rows to `sms_taglish.csv`.
 - **L4.** When the tasks are merged, freeze and update the README's results (section 5).
+  Done Nov 25 with the keyword fix, the warning signs and the admin training changes.
 
 ---
 
